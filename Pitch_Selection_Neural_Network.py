@@ -8,6 +8,10 @@ import keras
 from keras.models import Sequential
 from keras.layers import Dense
 from keras.models import model_from_json
+from keras.utils import np_utils
+from keras.wrappers.scikit_learn import KerasClassifier
+from sklearn.model_selection import cross_val_score
+from sklearn.model_selection import KFold
 
 #Preproccesing modules
 from sklearn.preprocessing import LabelEncoder, StandardScaler
@@ -91,7 +95,7 @@ def get_pitcher_model(first_name, last_name):
 			test_data = pd.read_csv(test_filename)
 		else: #If we haven't, get it off the web and store it for future runs
 			#training is done on data from 2015 through 2017
-			train_data = statcast_pitcher(start_dt='2015-01-01', end_dt='2017-12-31', player_id=int(playerid_lookup('sale', 'chris')['key_mlbam']))
+			train_data = statcast_pitcher(start_dt='2015-01-01', end_dt='2019-12-31', player_id=int(playerid_lookup('sale', 'chris')['key_mlbam']))
 			train_data.to_csv(train_filename)
 			#testing is done on data from the beginning of 2018 to present
 			test_data = statcast_pitcher(start_dt='2018-01-01', end_dt='2019-12-31', player_id=int(playerid_lookup('sale', 'chris')['key_mlbam']))
@@ -137,34 +141,31 @@ def get_pitcher_model(first_name, last_name):
 		label_encoder_handedness = LabelEncoder()
 		train_data['stand'] = label_encoder_handedness.fit_transform(train_data['stand'])
 		test_data['stand'] = label_encoder_handedness.fit_transform(test_data['stand'])
+		
+
+		train_data_result = np_utils.to_categorical(train_data_result)
+		print("TRAIN DATA RESULT", train_data_result)
+
 		sc = StandardScaler()
 		train_data = sc.fit_transform(train_data)
-		test_data_result = test_data[['pitch_code']]
-		test_data = test_data = test_data[['prev_pitch_3', 'prev_pitch_2', 'prev_pitch_1', 'balls', 'strikes', 'stand', 'on_3b', 'on_2b', 'on_1b', 'outs_when_up', 'pitch_number']]
-		test_data = sc.fit_transform(test_data)
+		test_data[['prev_pitch_3', 'prev_pitch_2', 'prev_pitch_1', 'balls', 'strikes', 'stand', 'on_3b', 'on_2b', 'on_1b', 'outs_when_up', 'pitch_number']] = sc.fit_transform(test_data[['prev_pitch_3', 'prev_pitch_2', 'prev_pitch_1', 'balls', 'strikes', 'stand', 'on_3b', 'on_2b', 'on_1b', 'outs_when_up', 'pitch_number']])
 
-		max_pitch_val = max(train_data_result['pitch_code'])
-
-		train_data_result['pitch_code'] = train_data_result['pitch_code']/max_pitch_val
-		test_data_result = test_data_result/max_pitch_val
-
-		return train_data, train_data_result, test_data, test_data_result, max_pitch_val
+		return train_data, train_data_result
 
 	def create_model(train_data_input, train_data_result, saved_model_name):
 		
 		#Initialize nerual network
 		model = Sequential()
-		print(np.size(train_data_input,1))
 		model.add(Dense(64, activation = 'relu', input_dim = 11))
 		#model.add(Dense(64, activation = 'relu', input_dim = np.size(train_data_input,1)))
-		model.add(Dense(64, activation = 'relu'))
-		model.add(Dense(1, activation = 'softmax'))
+		#model.add(Dense(6, init='uniform', activation = 'relu'))
+		model.add(Dense(15, activation = 'softmax'))
 
 		# Compiling Neural Network
-		model.compile(optimizer = 'adam', loss = 'binary_crossentropy', metrics = ['accuracy'])
+		model.compile(optimizer = 'adam', loss = 'categorical_crossentropy', metrics = ['accuracy'])
 
 		# Fitting our model 
-		model.fit(train_data_input, train_data_result, batch_size = 32, nb_epoch = 250)
+		model.fit(train_data_input, train_data_result, batch_size = 5, nb_epoch = 50, verbose=1)
 
 		model_json = model.to_json()
 		with open(saved_model_name+".json", "w") as json_file:
@@ -186,30 +187,38 @@ def get_pitcher_model(first_name, last_name):
 		print("Loaded model from disk")
 		return loaded_model
 
-	def test_model(data, data_result, model, max_val):
-		model.compile(optimizer = 'adam', loss = 'binary_crossentropy', metrics = ['accuracy'])
-		model_data = data
-		print(model_data)
-		predict = model.predict_on_batch(model_data)
-		print("With ",model_data," Predict: ",predict)
-		#data['predict_type'] = predict
-		data *= max_val
-		print("PREDICT",predict)
-		return predict, data_result
+	def test_model(train_data, train_data_result, model):
+		model.compile(optimizer = 'adam', loss = 'categorical_crossentropy', metrics = ['accuracy'])
+		predict = model.predict(train_data)
+		print(predict)
+		returnData = pd.DataFrame()
+
+		actual_pitch = []
+		predicted_pitch = []
+
+		for i in range(0,len(train_data_result)):
+			actual_pitch.append(np.argmax(train_data_result[i]))
+			predicted_pitch.append(np.argmax(predict[i]))
+
+		returnData['pitch'] = actual_pitch
+		returnData['predicted'] = predicted_pitch
+		print(returnData)
+		return returnData
 
 
 	#Get the pitch data and process it so that it is ready for the machine learning model
 	train_data_input, train_data_result, test_data = get_data(first_name, last_name)
-	train_data_input, train_data_result, test_data, test_data_result, max_pitch_val = pre_process_data(train_data_input, train_data_result, test_data)
+	train_data, train_data_result = pre_process_data(train_data_input, train_data_result, test_data)
 	saved_model_name = 'Data/'+str(last_name)+"_"+str(first_name)+"_model"
-	print(train_data_input)
+	print(train_data)
+	print(train_data_result)
 	#If we already have the model, load it, else make it
 	if os.path.isfile(saved_model_name+'.h5'):
 		model = fetch_model(saved_model_name)
 	else:
 		model = create_model(train_data_input, train_data_result, saved_model_name)
 
-	test_data = test_model(test_data, test_data_result, model, max_pitch_val)
+	test_data = test_model(train_data, train_data_result, model)
 	print(test_data)
 	return test_data
 
