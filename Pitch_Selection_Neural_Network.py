@@ -205,6 +205,15 @@ def get_pitcher_model(first_name, last_name):
 		print(returnData)
 		return returnData
 
+	def score_data(returnData):
+
+		def is_next_to(actual, projected):
+			if predicted == 1:
+				if actual in([11, 2, 4, 5]):
+					return True
+			if predicted == 2:
+				if actual in([11, 12, ]):
+					return True
 
 	#Get the pitch data and process it so that it is ready for the machine learning model
 	train_data_input, train_data_result, test_data = get_data(first_name, last_name)
@@ -218,7 +227,7 @@ def get_pitcher_model(first_name, last_name):
 	else:
 		model = create_model(train_data_input, train_data_result, saved_model_name)
 
-	test_data = test_model(train_data, train_data_result, model)
+	returnData = test_model(train_data, train_data_result, model)
 	print(test_data)
 	return test_data
 
