@@ -1,6 +1,3 @@
-#MODEL WORKS, CHANGE WHAT YOU ARE PREDICTING IN THE 'GET_PITCH_CODE' FUNCTION
-#THE PREDICTION FUCNTION DOESN'T WORK YET, NOT SURE WHAT IS CAUSING IT TO NOT WORK BUT IT ALWAYS PREDICTS 1/MAX
-
 from __future__ import absolute_import, division, print_function
 
 # Importing the Keras libraries and packages
@@ -82,8 +79,6 @@ def get_pitcher_model(first_name, last_name):
 		dataDF['prev_pitch_3'] = prev_pitch_three
 		return dataDF		
 
-
-
 	#Read in and return the data we need
 	def get_data(first_name, last_name):
 
@@ -93,9 +88,10 @@ def get_pitcher_model(first_name, last_name):
 		if os.path.isfile(train_filename) and os.path.isfile(test_filename): #If we've already gotten the data, read it in
 			train_data = pd.read_csv(train_filename)
 			test_data = pd.read_csv(test_filename)
-		else: #If we haven't, get it off the web and store it for future runs
+		else: 
+			#If we haven't, get it off the web and store it for future runs
 			#training is done on data from 2015 through 2017
-			train_data = statcast_pitcher(start_dt='2015-01-01', end_dt='2019-12-31', player_id=int(playerid_lookup('sale', 'chris')['key_mlbam']))
+			train_data = statcast_pitcher(start_dt='2015-01-01', end_dt='2017-12-31', player_id=int(playerid_lookup('sale', 'chris')['key_mlbam']))
 			train_data.to_csv(train_filename)
 			#testing is done on data from the beginning of 2018 to present
 			test_data = statcast_pitcher(start_dt='2018-01-01', end_dt='2019-12-31', player_id=int(playerid_lookup('sale', 'chris')['key_mlbam']))
@@ -106,13 +102,12 @@ def get_pitcher_model(first_name, last_name):
 		train_data = train_data.dropna(subset=['pitch_type'])
 		train_data['pitch_code'] = train_data.apply (lambda row: get_pitch_code(row, pitcher_pitches), axis=1)
 
-
 		#Do the same as above but for the testing data in case they added a new pitch
 		test_data = test_data[test_data['pitch_type'].isin(pitcher_pitches)]
 		test_data = test_data.dropna(subset=['pitch_type'])
+
 		#Encode all the pitch type/location info to a unique int
 		test_data['pitch_code'] = test_data.apply (lambda row: get_pitch_code(row, pitcher_pitches), axis=1)
-
 		train_data = get_prev_pitch(train_data)
 		test_data = get_prev_pitch(test_data)
 
@@ -137,28 +132,23 @@ def get_pitcher_model(first_name, last_name):
 
 	#Turns string columns into categorical ints
 	def pre_process_data(train_data, train_data_result, test_data):
-
 		label_encoder_handedness = LabelEncoder()
 		train_data['stand'] = label_encoder_handedness.fit_transform(train_data['stand'])
 		test_data['stand'] = label_encoder_handedness.fit_transform(test_data['stand'])
 		
-
 		train_data_result = np_utils.to_categorical(train_data_result)
-		print("TRAIN DATA RESULT", train_data_result)
+		# print("TRAIN DATA RESULT", train_data_result)
 
 		sc = StandardScaler()
 		train_data = sc.fit_transform(train_data)
 		test_data[['prev_pitch_3', 'prev_pitch_2', 'prev_pitch_1', 'balls', 'strikes', 'stand', 'on_3b', 'on_2b', 'on_1b', 'outs_when_up', 'pitch_number']] = sc.fit_transform(test_data[['prev_pitch_3', 'prev_pitch_2', 'prev_pitch_1', 'balls', 'strikes', 'stand', 'on_3b', 'on_2b', 'on_1b', 'outs_when_up', 'pitch_number']])
 
-		return train_data, train_data_result
+		return train_data, train_data_result, test_data
 
 	def create_model(train_data_input, train_data_result, saved_model_name):
-		
 		#Initialize nerual network
 		model = Sequential()
 		model.add(Dense(64, activation = 'relu', input_dim = 11))
-		#model.add(Dense(64, activation = 'relu', input_dim = np.size(train_data_input,1)))
-		#model.add(Dense(6, init='uniform', activation = 'relu'))
 		model.add(Dense(15, activation = 'softmax'))
 
 		# Compiling Neural Network
@@ -170,6 +160,7 @@ def get_pitcher_model(first_name, last_name):
 		model_json = model.to_json()
 		with open(saved_model_name+".json", "w") as json_file:
 			json_file.write(model_json)
+
 		# serialize weights to HDF5
 		model.save_weights(saved_model_name+".h5")
 		print("Saved model to disk")
@@ -182,53 +173,79 @@ def get_pitcher_model(first_name, last_name):
 		loaded_model_json = json_file.read()
 		json_file.close()
 		loaded_model = model_from_json(loaded_model_json)
+
 		# load weights into new model
 		loaded_model.load_weights(saved_model_name+".h5")
 		print("Loaded model from disk")
 		return loaded_model
 
-	def test_model(train_data, train_data_result, model):
+	def test_model(test_data, model):
 		model.compile(optimizer = 'adam', loss = 'categorical_crossentropy', metrics = ['accuracy'])
-		predict = model.predict(train_data)
-		print(predict)
-		returnData = pd.DataFrame()
+		train_data = test_data[['prev_pitch_3', 'prev_pitch_2', 'prev_pitch_1', 'balls', 'strikes', 'stand', 'on_3b', 'on_2b', 'on_1b', 'outs_when_up', 'pitch_number']]
 
-		actual_pitch = []
+		predict = model.predict(train_data)
+		return_data = pd.DataFrame()
+
 		predicted_pitch = []
 
-		for i in range(0,len(train_data_result)):
-			actual_pitch.append(np.argmax(train_data_result[i]))
+		for i in range(0,len(predict)):
 			predicted_pitch.append(np.argmax(predict[i]))
 
-		returnData['pitch'] = actual_pitch
-		returnData['predicted'] = predicted_pitch
-		print(returnData)
-		return returnData
+		return_data['pitch'] = test_data['pitch_code']
+		return_data['predicted'] = predicted_pitch
+		#print(return_data)
+		return return_data.dropna()
 
-	def score_data(returnData):
+	def random_score(data):
+		random_selection = []
+		for i in range(0, len(data)):
+			random_selection.append(int(data['pitch'].sample(n=1, random_state=7)))
+		data['predicted'] = random_selection
+		return data
 
-		def is_next_to(actual, projected):
-			if predicted == 1:
-				if actual in([11, 2, 4, 5]):
-					return True
-			if predicted == 2:
-				if actual in([11, 12, ]):
-					return True
+	def score_data(return_data):
+		total_score = 0
+		adjacents = [[0], [11,2,4,5], [11, 12, 1, 3, 4, 5, 6], [2, 12, 5, 6], [11, 1, 5, 7, 13, 2, 8], [1, 2, 3, 4, 6, 7, 8, 9], [3, 5, 9, 12, 14, 2, 8], [4, 5, 8, 13], [7, 5, 9, 13, 14, 4, 6], [6, 8, 14, 5], [0], [1, 2, 4], [2, 3, 6], [4, 7, 8], [6, 8, 9]]
+
+		def is_adjacent(actual, predicted):
+			if predicted in adjacents[actual]:
+				return 0.5
+			else:
+				return 0
+
+		for index, row in return_data.iterrows():
+			actual = int(row['pitch'])
+			predicted = int(row['predicted'])
+
+			if predicted == actual: 
+				total_score += 1
+			else:
+				total_score += is_adjacent(actual, predicted)
+
+		return (total_score/len(return_data))
+
 
 	#Get the pitch data and process it so that it is ready for the machine learning model
 	train_data_input, train_data_result, test_data = get_data(first_name, last_name)
-	train_data, train_data_result = pre_process_data(train_data_input, train_data_result, test_data)
+	train_data, train_data_result, test_data = pre_process_data(train_data_input, train_data_result, test_data)
 	saved_model_name = 'Data/'+str(last_name)+"_"+str(first_name)+"_model"
-	print(train_data)
-	print(train_data_result)
+	
 	#If we already have the model, load it, else make it
 	if os.path.isfile(saved_model_name+'.h5'):
 		model = fetch_model(saved_model_name)
 	else:
 		model = create_model(train_data_input, train_data_result, saved_model_name)
 
-	returnData = test_model(train_data, train_data_result, model)
-	print(test_data)
+	return_data = test_model(test_data, model)
+	print(return_data)
+
+	print("Accuracy: ", score_data(return_data))
+	print("Random accuracy: ",score_data(random_score(return_data)))
+
+
 	return test_data
 
+#get_pitcher_model('clayton', 'kershaw')
+#get_pitcher_model('madison', 'bumgarner')
+#get_pitcher_model('max', 'scherzer')
 get_pitcher_model('chris', 'sale')
